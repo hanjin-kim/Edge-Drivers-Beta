@@ -14,6 +14,15 @@ local device_Info = capabilities["legendabsolute60149.deviceInfo"]
 
 --local number_fields = {}
 
+-- Absolute humidity (g/m3) from temperature (C) and relative humidity (%), Magnus formula
+-- returns nil when inputs are out of range
+local function absolute_humidity(temp_c, rh)
+  if type(temp_c) ~= "number" or type(rh) ~= "number" then return nil end
+  if rh < 0 or rh > 100 or temp_c <= -243.5 then return nil end
+  local saturation_hpa = 6.112 * math.exp((17.67 * temp_c) / (temp_c + 243.5))
+  return saturation_hpa * rh * 2.1674 / (273.15 + temp_c)
+end
+
 ---- Calculator functions
 local function calculator(driver, device, command, set_text_formula)
 
@@ -43,6 +52,25 @@ local function calculator(driver, device, command, set_text_formula)
 
   if formula_leng == 1 then
     error = 1
+
+  elseif string.upper(formula) == "AH" then -- Absolute humidity: Field 1 = Temp C, Field 2 = RH %
+    local ah = absolute_humidity(num[1], num[2])
+    if ah ~= nil then
+      error = 0
+      result = ah
+    else
+      error = 1
+    end
+
+  elseif string.upper(formula) == "AHD" then -- Absolute humidity difference: (Field 1,2) - (Field 3,4)
+    local ah_in = absolute_humidity(num[1], num[2])
+    local ah_out = absolute_humidity(num[3], num[4])
+    if ah_in ~= nil and ah_out ~= nil then
+      error = 0
+      result = ah_in - ah_out
+    else
+      error = 1
+    end
 
   elseif (character[1] == "A" or character[1] == "a") and formula_leng == 2 then -- Average value of fields selected
 
@@ -297,6 +325,7 @@ local function setTextFormula_handler(driver, device, command)
   local set_text_formula = command.args.value
   if set_text_formula == "" then set_text_formula = "-" end
   device:set_field("set_text_formula", set_text_formula, {persist = false})
+  device:set_field("saved_text_formula", set_text_formula, {persist = true}) -- survives hub restart
   device:emit_event(text_Formula.textFormula(set_text_formula))
 
   if (set_text_formula ~= "C+" and set_text_formula ~= "C-" and set_text_formula ~= "c+"  and set_text_formula ~= "c-") then
@@ -321,12 +350,12 @@ local function device_init(driver, device)
     end)
   end
 
-  -- init set_text_formula 
-  local set_text_formula = device:get_latest_state("main", text_Formula.ID, text_Formula.textFormula.NAME)
-  if set_text_formula == nil then 
-    set_text_formula = "-"
-  end
+  -- init set_text_formula: persisted copy first, latest state may be empty right after hub restart
+  local set_text_formula = device:get_field("saved_text_formula")
+    or device:get_latest_state("main", text_Formula.ID, text_Formula.textFormula.NAME)
+    or "-"
   device:set_field("set_text_formula", set_text_formula, {persist = false})
+  device:set_field("saved_text_formula", set_text_formula, {persist = true})
   device:emit_event(text_Formula.textFormula(set_text_formula))
 
   --init set_result
@@ -366,6 +395,12 @@ local function device_init(driver, device)
   str = str .."<em style= 'font-weight: bold;'> C+, C-".."</em>"
   str = str .. ": Add or Subtract Field 1 value to Result" .. "<BR>"
   str = str .. "Every time Field 1 updated then do new Counter" .. "<BR>"
+  str = str .."<em style= 'font-weight: bold;'> Absolute Humidity".."</em>"
+  str = str .. ": AH or ah" .. "<BR>"
+  str = str .."<em style= 'font-weight: bold;'> AH".."</em>"
+  str = str .. " = g/m3 from Field 1 Temp (C) and Field 2 RH (%)" .. "<BR>"
+  str = str .."<em style= 'font-weight: bold;'> AHD".."</em>"
+  str = str .. " = AH(Field 1,2) - AH(Field 3 Temp, Field 4 RH)" .. "<BR>"
   local str_out = "<table style='font-size:50%'> <tbody>".. "<tr> <th align=left>" .. "</th> <td>" .. str .. "</td></tr>"
 
   str_out = str_out .. "</tbody></table>"
@@ -405,8 +440,9 @@ local function device_added(driver, device,command)
     cap_status = device:get_latest_state("main", calculation_Result.ID, calculation_Result.calculationResult.NAME)
     if cap_status == nil then cap_status = 0 end
     device:emit_event(calculation_Result.calculationResult(cap_status))
-    cap_status = device:get_latest_state("main", text_Formula.ID, text_Formula.textFormula.NAME)
-    if cap_status == nil then cap_status = "-" end
+    cap_status = device:get_field("saved_text_formula")
+      or device:get_latest_state("main", text_Formula.ID, text_Formula.textFormula.NAME)
+      or "-"
     device:emit_event(text_Formula.textFormula(cap_status))
     local str =  "Waiting new data..."
     if device.preferences.instructions == true or device.preferences.instructions == nil then
