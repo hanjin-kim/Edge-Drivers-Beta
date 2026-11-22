@@ -143,6 +143,12 @@ local function do_preferences(self, device, event, args)
         device:send(zcl_clusters.OccupancySensing.attributes.PIROccupiedToUnoccupiedDelay:write(device, value_send))
 
 
+      --- AOYAN AY204T mmWave settings via Tuya EF00 datapoints
+      elseif id == "aoyanSensitivity" then
+        tuya_ef00.set_dp_value(device, tuya_ef00.DP_AOYAN_SENSITIVITY, newParameterValue)
+      elseif id == "aoyanFadingTime" then
+        tuya_ef00.set_dp_value(device, tuya_ef00.DP_AOYAN_FADING_TIME, newParameterValue)
+
       elseif id == "iasZoneReports" and device:get_manufacturer() ~= "IKEA of Sweden" and device:get_model() ~= "lumi.sen_ill.mgl01" then
         -- Configure iasZone interval report
         local interval = device.preferences.iasZoneReports
@@ -199,6 +205,7 @@ local function is_aoyan(device)
 end
 
 local AOYAN_REPORTING_FIELD = "aoyan_reporting_v1"
+local AOYAN_PROFILE_FIELD = "aoyan_profile_v1"
 
 -- bind and configure humidity / illuminance reporting (temperature is done in do_configure)
 local function configure_aoyan_reporting(self, device)
@@ -462,6 +469,11 @@ local function do_init(self, device)
     device:send(device_management.build_bind_request(device, tempMeasurement.ID, self.environment_info.hub_zigbee_eui))
     device:send(tempMeasurement.attributes.MeasuredValue:configure_reporting(device, 30, maxTime, changeRep))
     configure_aoyan_reporting(self, device)
+  end
+  -- move already paired AOYAN devices to the profile with presence settings
+  if is_aoyan(device) and device:get_field(AOYAN_PROFILE_FIELD) == nil then
+    device:try_update_metadata({ profile = "motion-aoyan-presence" })
+    device:set_field(AOYAN_PROFILE_FIELD, true, { persist = true })
   end
   device:refresh()
 end

@@ -554,4 +554,4 @@ zigbeeManufacturer:
     deviceLabel: AOYAN Presence Sensor
     manufacturer: AOYAN
     model: AY204T
-    deviceProfileName: motion-temp-humidity-illumin-battery
+    deviceProfileName: motion-aoyan-presence

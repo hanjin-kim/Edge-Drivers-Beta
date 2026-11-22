@@ -41,7 +41,11 @@ local function data_report_handler(driver, device, zb_rx)
       return
     end
     local val = decode_value(dp_type, body:sub(pos + 4, pos + 3 + len))
-    log.debug(string.format("<<< EF00 DP=%d type=%d len=%d val=%d (ignored) >>>", dp, dp_type, len, val))
+    if dp == 2 or dp == 102 then -- AOYAN sensitivity / keep time: echo after a write
+      log.info(string.format("<<< EF00 setting DP=%d val=%d >>>", dp, val))
+    else
+      log.debug(string.format("<<< EF00 DP=%d type=%d len=%d val=%d (ignored) >>>", dp, dp_type, len, val))
+    end
     pos = pos + 4 + len
   end
 end
@@ -65,6 +69,16 @@ local function send_tuya_command(device, cmd, payload)
   device:send(messages.ZigbeeMessageTx({ address_header = addrh, body = message_body }))
 end
 
+local CMD_DATA_REQUEST = 0x00
+local seq = 0
+
+-- write a VALUE (4 byte) datapoint: seq(2) dp(1) type(1) len(2) value(4)
+local function set_dp_value(device, dp, value)
+  seq = (seq + 1) % 0x10000
+  log.info(string.format("<<< EF00 set DP=%d val=%d >>>", dp, value))
+  send_tuya_command(device, CMD_DATA_REQUEST, string.pack(">I2BBI2i4", seq, dp, DP_TYPE_VALUE, 4, value))
+end
+
 -- device asks for time: reply with payload size(2) + UTC(4) + local time(4)
 local function time_sync_handler(driver, device, zb_rx)
   local utc = os.time()
@@ -77,4 +91,7 @@ end
 return {
   data_report_handler = data_report_handler,
   time_sync_handler = time_sync_handler,
+  set_dp_value = set_dp_value,
+  DP_AOYAN_SENSITIVITY = 2,   -- 0-19
+  DP_AOYAN_FADING_TIME = 102, -- seconds, 0-28800
 }
